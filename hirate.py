@@ -172,6 +172,31 @@ def report(args, prefix_len, suffix_len, results, dur):
         print(f"[注意] 实测命中率与目标偏差 >3%。可能原因:并发过高导致前缀被驱逐("
               f"调低并发或加大显存),或 page 对齐误差。", file=sys.stderr)
 
+    return {
+        "target_hit_rate": args.hit_rate,
+        "input_len": total_len,
+        "prefix_len": prefix_len,
+        "suffix_len": suffix_len,
+        "num_prompts": args.num_prompts,
+        "concurrency": args.concurrency,
+        "max_new_tokens": args.max_new_tokens,
+        "success": len(ok),
+        "fail": fail,
+        "duration_s": dur,
+        "req_throughput": (len(ok) / dur) if dur else 0.0,
+        "meta_available": have_meta,
+        "sum_prompt_tokens": sum_prompt,
+        "sum_cached_tokens": sum_cached,
+        "measured_hit_rate": hit / 100.0,
+        "nominal_input_throughput": (sum_prompt / dur) if dur else 0.0,
+        "real_prefill_throughput": (real_input / dur) if dur else 0.0,
+        "output_throughput": (tot_out / dur) if dur else 0.0,
+        "lat_mean_ms": statistics.mean(lats) if lats else 0.0,
+        "lat_p50_ms": pct(lats, 50),
+        "lat_p90_ms": pct(lats, 90),
+        "lat_p99_ms": pct(lats, 99),
+    }
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -187,6 +212,8 @@ def main():
     ap.add_argument("--warmup", type=int, default=2, help="前缀预热次数")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--timeout", type=float, default=600)
+    ap.add_argument("--result-json", default=None,
+                    help="把本次结果以 JSON 写入(或追加到 JSONL)该文件")
     args = ap.parse_args()
 
     if not (args.vocab_size or args.tokenizer):
@@ -201,7 +228,11 @@ def main():
           f"共 {len(inputs)} 条", file=sys.stderr)
 
     results, dur = asyncio.run(run(args, shared_prefix, inputs))
-    report(args, prefix_len, suffix_len, results, dur)
+    summary = report(args, prefix_len, suffix_len, results, dur)
+    if args.result_json:
+        with open(args.result_json, "a") as f:
+            f.write(json.dumps(summary, ensure_ascii=False) + "\n")
+        print(f"[info] 结果已追加到 {args.result_json}", file=sys.stderr)
 
 
 if __name__ == "__main__":
